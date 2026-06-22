@@ -1906,7 +1906,10 @@ const Voice = {
   async startRecord() {
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.recorder = new MediaRecorder(this.stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4' });
+      let mimeType = '';
+      const preferred = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
+      for (const m of preferred) { if (MediaRecorder.isTypeSupported(m)) { mimeType = m; break; } }
+      this.recorder = mimeType ? new MediaRecorder(this.stream, { mimeType }) : new MediaRecorder(this.stream);
       this.chunks = [];
       this.seconds = 0;
       this.recorder.ondataavailable = (e) => this.chunks.push(e.data);
@@ -1918,7 +1921,12 @@ const Voice = {
       this.render();
       Toast.info('Recording started...');
     } catch (e) {
-      Toast.error('Microphone access denied');
+      const msg = e.name === 'NotAllowedError'
+        ? 'Microphone access denied. Allow microphone permissions in your browser settings.'
+        : e.name === 'NotFoundError'
+        ? 'No microphone found on this device.'
+        : 'Recording unavailable on this browser/device. Try Chrome or Edge on desktop.';
+      Toast.error(msg);
     }
   },
   pauseRecord() {
@@ -2015,7 +2023,10 @@ const Voice = {
   setupAnalyser() {
     if (!this.stream) return;
     try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const audioCtx = new AudioCtx();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
       const source = audioCtx.createMediaStreamSource(this.stream);
       this.analyser = audioCtx.createAnalyser();
       this.analyser.fftSize = 256;
@@ -2263,22 +2274,51 @@ const Settings = {
       </div>
     `;
   },
+  downloadFile(content, filename) {
+    const blob = new Blob([content], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const isMobile = /iPad|iPhone|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+      Toast.success('File downloaded!');
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      Toast.success('File downloaded!');
+    }
+  },
+  getFileInput() {
+    let input = document.getElementById('settingsFileInput');
+    if (!input) {
+      input = document.createElement('input');
+      input.id = 'settingsFileInput';
+      input.type = 'file';
+      input.accept = '.json';
+      input.style.position = 'fixed';
+      input.style.top = '-9999px';
+      input.style.left = '-9999px';
+      input.style.opacity = '0';
+      input.style.zIndex = '-1';
+      document.body.appendChild(input);
+    }
+    return input;
+  },
   exportData() {
     const json = Store.exportJSON();
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `studiaos-backup-${today()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    Toast.success('Data exported!');
+    this.downloadFile(json, `studiaos-export-${today()}.json`);
   },
   importData() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = (e) => {
+    const input = this.getFileInput();
+    input.value = '';
+    const handler = (e) => {
       const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
@@ -2292,26 +2332,19 @@ const Settings = {
         }
       };
       reader.readAsText(file);
+      input.removeEventListener('change', handler);
     };
+    input.addEventListener('change', handler);
     input.click();
   },
   createBackup() {
     const backup = Store.createBackup();
-    const json = JSON.stringify(backup, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `studiaos-backup-${today()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    Toast.success('Backup created!');
+    this.downloadFile(JSON.stringify(backup, null, 2), `studiaos-backup-${today()}.json`);
   },
   restoreBackup() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = (e) => {
+    const input = this.getFileInput();
+    input.value = '';
+    const handler = (e) => {
       const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
@@ -2328,7 +2361,9 @@ const Settings = {
         } catch { Toast.error('Invalid file'); }
       };
       reader.readAsText(file);
+      input.removeEventListener('change', handler);
     };
+    input.addEventListener('change', handler);
     input.click();
   },
   resetAll() {
@@ -2417,7 +2452,12 @@ const App = {
       document.getElementById('sidebar').classList.toggle('open');
     };
     document.getElementById('sidebarCollapse').onclick = () => {
-      document.getElementById('sidebar').classList.toggle('collapsed');
+      const sidebar = document.getElementById('sidebar');
+      if (window.innerWidth <= 768) {
+        sidebar.classList.remove('open');
+      } else {
+        sidebar.classList.toggle('collapsed');
+      }
     };
     document.getElementById('themeBtn').onclick = () => {
       const isDark = document.body.getAttribute('data-theme') === 'dark';
