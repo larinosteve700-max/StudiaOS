@@ -969,11 +969,42 @@ const Pomodoro = {
     this.startTime = new Date();
     this.render();
     this.timer = setInterval(() => this.tick(), 1000);
+    try {
+      if (!this.audioCtx || this.audioCtx.state === 'closed') {
+        this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      this._scheduleAlarm(this.audioCtx, this.timeLeft);
+    } catch {}
+  },
+
+  _scheduleAlarm(ctx, delaySec) {
+    const now = ctx.currentTime;
+    const alarm = now + Math.max(delaySec, 0);
+    const tones = [800, 600];
+    for (let cycle = 0; cycle < 3; cycle++) {
+      for (let t = 0; t < tones.length; t++) {
+        const start = alarm + cycle * 1.2 + t * 0.55;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = tones[t];
+        gain.gain.setValueAtTime(0.3, start);
+        gain.gain.exponentialRampToValueAtTime(0.01, start + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.4);
+      }
+    }
   },
 
   pause() {
     this.state = 'paused';
     clearInterval(this.timer);
+    if (this.audioCtx && this.audioCtx.state !== 'closed') {
+      try { this.audioCtx.close(); } catch {}
+      this.audioCtx = null;
+    }
     this.render();
   },
 
@@ -981,6 +1012,12 @@ const Pomodoro = {
     this.state = 'running';
     this.render();
     this.timer = setInterval(() => this.tick(), 1000);
+    try {
+      if (!this.audioCtx || this.audioCtx.state === 'closed') {
+        this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      this._scheduleAlarm(this.audioCtx, this.timeLeft);
+    } catch {}
   },
 
   reset() {
@@ -988,6 +1025,10 @@ const Pomodoro = {
     this.state = 'idle';
     this.timeLeft = this.modes[this.mode].minutes * 60;
     this.totalTime = this.timeLeft;
+    if (this.audioCtx && this.audioCtx.state !== 'closed') {
+      try { this.audioCtx.close(); } catch {}
+      this.audioCtx = null;
+    }
     this.render();
   },
 
@@ -1018,7 +1059,6 @@ const Pomodoro = {
     if (this.mode === 'focus') {
       Toast.success(`Focus session complete! ${duration} min`);
       Notify.send('Pomodoro Complete', { body: `Great focus session! ${duration} minutes done.` });
-      this.playSound();
     }
 
     if (this.mode === 'focus') {
@@ -1041,20 +1081,6 @@ const Pomodoro = {
       this.totalTime = this.timeLeft;
       this.render();
     }
-  },
-
-  playSound() {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = 800;
-      gain.gain.value = 0.3;
-      osc.start();
-      osc.stop(ctx.currentTime + 0.3);
-    } catch {}
   }
 };
 
